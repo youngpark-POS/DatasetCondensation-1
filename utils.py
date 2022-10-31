@@ -1,15 +1,16 @@
 import time
 import os
+from collections import Counter
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Subset, ConcatDataset
 from torchvision import datasets, transforms
 from scipy.ndimage.interpolation import rotate as scipyrotate
 from networks import MLP, ConvNet, LeNet, AlexNet, AlexNetBN, VGG11, VGG11BN, ResNet18, ResNet18BN_AP, ResNet18BN
 
-def get_dataset(dataset, data_path):
+def get_dataset(dataset, data_path, imbalance):
     if dataset == 'MNIST':
         channel = 1
         im_size = (28, 28)
@@ -52,6 +53,15 @@ def get_dataset(dataset, data_path):
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)])
         dst_train = datasets.CIFAR10(data_path, train=True, download=True, transform=transform) # no augmentation
         dst_test = datasets.CIFAR10(data_path, train=False, download=True, transform=transform)
+        if imbalance != 'balanced':
+            indices = np.random.multinomial(len(dst_train) // num_classes, [np.random.rand() for _ in range(num_classes)])
+            c = Counter(indices)
+            trimmed_dst_train, trimmed_dst_test = [], []
+            for i in range(num_classes):
+                trimmed_dst_train.append(Subset(trimmed_dst_train, np.where(dst_train.targets == i)[:c[i]]))
+                trimmed_dst_test.append(Subset(trimmed_dst_test, np.where(dst_test.targets == i)[:c[i]]))
+            dst_train = ConcatDataset(trimmed_dst_train)
+            dst_test = ConcatDataset(trimmed_dst_test)
         class_names = dst_train.classes
 
     elif dataset == 'CIFAR100':

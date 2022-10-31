@@ -8,7 +8,6 @@ import torch.nn as nn
 from torchvision.utils import save_image
 from utils import get_loops, get_dataset, get_network, get_eval_pool, evaluate_synset, get_daparam, match_loss, get_time, TensorDataset, epoch, DiffAugment, ParamDiffAug
 
-
 def main():
 
     parser = argparse.ArgumentParser(description='Parameter Processing')
@@ -30,6 +29,8 @@ def main():
     parser.add_argument('--save_path', type=str, default='result', help='path to save results')
     parser.add_argument('--dis_metric', type=str, default='ours', help='distance metric')
 
+    parser.add_argument('--imbalance', type=str, default='balanced', help='imbalance type of synthetic data')
+
     args = parser.parse_args()
     args.method = 'DM'
     args.outer_loop, args.inner_loop = get_loops(args.ipc)
@@ -45,7 +46,7 @@ def main():
 
     eval_it_pool = np.arange(0, args.Iteration+1, 2000).tolist() if args.eval_mode == 'S' or args.eval_mode == 'SS' else [args.Iteration] # The list of iterations when we evaluate models and record results.
     print('eval_it_pool: ', eval_it_pool)
-    channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader = get_dataset(args.dataset, args.data_path)
+    channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader = get_dataset(args.dataset, args.data_path, args.imbalance)
     model_eval_pool = get_eval_pool(args.eval_mode, args.model, args.model)
 
 
