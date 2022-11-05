@@ -1,12 +1,14 @@
 import os
 import time
 import copy
+from collections import Counter
 import argparse
 import numpy as np
 import torch
 import torch.nn as nn
 from torchvision.utils import save_image
-from utils import get_loops, get_dataset, get_network, get_eval_pool, evaluate_synset, get_daparam, match_loss, get_time, TensorDataset, epoch, DiffAugment, ParamDiffAug
+from utils import get_loops, get_dataset, get_network, get_eval_pool, evaluate_synset, get_daparam, match_loss, get_time, TensorDataset, epoch, DiffAugment, ParamDiffAug, init_synset
+
 
 def main():
 
@@ -28,9 +30,9 @@ def main():
     parser.add_argument('--data_path', type=str, default='data', help='dataset path')
     parser.add_argument('--save_path', type=str, default='result', help='path to save results')
     parser.add_argument('--dis_metric', type=str, default='ours', help='distance metric')
-
-    parser.add_argument('--imbalance', type=str, default='balanced', help='imbalance type of synthetic data')
-
+    parser.add_argument('--imbal', type=str, default='balanced', help='imbalance type of training data')
+    parser.add_argument('--imbal_syn', type=str, default='balanced', help='imbalance type of syn data')
+    
     args = parser.parse_args()
     args.method = 'DM'
     args.outer_loop, args.inner_loop = get_loops(args.ipc)
@@ -46,7 +48,7 @@ def main():
 
     eval_it_pool = np.arange(0, args.Iteration+1, 2000).tolist() if args.eval_mode == 'S' or args.eval_mode == 'SS' else [args.Iteration] # The list of iterations when we evaluate models and record results.
     print('eval_it_pool: ', eval_it_pool)
-    channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader = get_dataset(args.dataset, args.data_path, args.imbalance)
+    channel, im_size, num_classes, class_names, mean, std, dst_train, dst_test, testloader = get_dataset(args.dataset, args.data_path)
     model_eval_pool = get_eval_pool(args.eval_mode, args.model, args.model)
 
 
@@ -69,12 +71,22 @@ def main():
 
         images_all = [torch.unsqueeze(dst_train[i][0], dim=0) for i in range(len(dst_train))]
         labels_all = [dst_train[i][1] for i in range(len(dst_train))]
+
+        if args.imbal != 'balanced':
+
+            data_per_class = len(images_all) // num_classes
+            num_drop = [np.random.randint(data_per_class) for _ in range(num_classes)]
+            sorted_set = sorted(zip(images_all, labels_all), key=lambda x: x[1])
+            images_all, labels_all = [], []
+            for i in range(num_classes):
+                target_set = sorted_set[data_per_class*i:data_per_class*(i+1)-num_drop[i]]
+                images_all.extend([x[0] for x in target_set])
+                labels_all.extend([x[1] for x in target_set])
+
         for i, lab in enumerate(labels_all):
             indices_class[lab].append(i)
         images_all = torch.cat(images_all, dim=0).to(args.device)
         labels_all = torch.tensor(labels_all, dtype=torch.long, device=args.device)
-
-
 
         for c in range(num_classes):
             print('class c = %d: %d real images'%(c, len(indices_class[c])))
@@ -88,8 +100,9 @@ def main():
 
 
         ''' initialize the synthetic data '''
-        image_syn = torch.randn(size=(num_classes*args.ipc, channel, im_size[0], im_size[1]), dtype=torch.float, requires_grad=True, device=args.device)
-        label_syn = torch.tensor([np.ones(args.ipc)*i for i in range(num_classes)], dtype=torch.long, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
+        # image_syn = torch.randn(size=(num_classes*args.ipc, channel, im_size[0], im_size[1]), dtype=torch.float, requires_grad=True, device=args.device)
+        # label_syn = torch.tensor([np.ones(args.ipc)*i for i in range(num_classes)], dtype=torch.long, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
+        image_syn, label_syn = init_synset(args, channel, num_classes, im_size, indices_class)
 
         if args.init == 'real':
             print('initialize synthetic data from random real images')
@@ -126,7 +139,11 @@ def main():
                         accs_all_exps[model_eval] += accs
 
                 ''' visualize and save '''
-                save_name = os.path.join(args.save_path, 'vis_%s_%s_%s_%dipc_exp%d_iter%d.png'%(args.method, args.dataset, args.model, args.ipc, exp, it))
+                save_name = os.path.join(args.save_path, 'vis_%s_%s_%s_%dipc_exp%d_iter%d_%s_%s.png'% \
+                                        (args.method, args.dataset, args.model, args.ipc, exp, it, \
+                                        "" if args.imbal == 'balanced' else "imbal " + args.imbal, \
+                                        "" if args.imbal_syn == 'balanced' else "imbal_syn " + args.imbal_syn
+                                        ))
                 image_syn_vis = copy.deepcopy(image_syn.detach().cpu())
                 for ch in range(channel):
                     image_syn_vis[:, ch] = image_syn_vis[:, ch]  * std[ch] + mean[ch]

@@ -1,6 +1,8 @@
 import time
 import os
-from collections import Counter
+from math import ceil, log2
+from functools import reduce
+from xml.dom import INVALID_MODIFICATION_ERR
 import numpy as np
 import torch
 import torch.nn as nn
@@ -10,7 +12,7 @@ from torchvision import datasets, transforms
 from scipy.ndimage.interpolation import rotate as scipyrotate
 from networks import MLP, ConvNet, LeNet, AlexNet, AlexNetBN, VGG11, VGG11BN, ResNet18, ResNet18BN_AP, ResNet18BN
 
-def get_dataset(dataset, data_path, imbalance):
+def get_dataset(dataset, data_path):
     if dataset == 'MNIST':
         channel = 1
         im_size = (28, 28)
@@ -53,16 +55,20 @@ def get_dataset(dataset, data_path, imbalance):
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(mean=mean, std=std)])
         dst_train = datasets.CIFAR10(data_path, train=True, download=True, transform=transform) # no augmentation
         dst_test = datasets.CIFAR10(data_path, train=False, download=True, transform=transform)
-        if imbalance != 'balanced':
-            indices = np.random.multinomial(len(dst_train) // num_classes, [np.random.rand() for _ in range(num_classes)])
-            c = Counter(indices)
-            trimmed_dst_train, trimmed_dst_test = [], []
-            for i in range(num_classes):
-                trimmed_dst_train.append(Subset(trimmed_dst_train, np.where(dst_train.targets == i)[:c[i]]))
-                trimmed_dst_test.append(Subset(trimmed_dst_test, np.where(dst_test.targets == i)[:c[i]]))
-            dst_train = ConcatDataset(trimmed_dst_train)
-            dst_test = ConcatDataset(trimmed_dst_test)
         class_names = dst_train.classes
+        # if imbalance != 'balanced':
+
+        #     np.random.seed(0)
+        #     prob = np.random.rand(num_classes)
+        #     normalized_prob = [p / sum(prob) for p in prob]
+
+        #     indices = np.random.multinomial(len(dst_train) // num_classes, normalized_prob)
+        #     c = Counter({i: indices[i] for i in range(num_classes)})
+        #     trimmed_dst_train= []
+        #     for i in range(num_classes):
+        #         idx_i_train = np.where(np.array(dst_train.targets) == i)
+        #         trimmed_dst_train.append(Subset(dst_train, idx_i_train[:c[i]]))
+        #     dst_train = ConcatDataset(trimmed_dst_train)
 
     elif dataset == 'CIFAR100':
         channel = 3
@@ -649,6 +655,23 @@ def rand_cutout(x, param):
     x = x * mask.unsqueeze(1)
     return x
 
+
+def init_synset(args, channel, num_classes, im_size, indices_class=None):
+
+    overall_synset_size = num_classes*args.ipc
+    image_syn = torch.randn(size=(overall_synset_size, channel, im_size[0], im_size[1]), dtype=torch.float, requires_grad=True, device=args.device)
+
+    data_per_class = [len(i) for i in indices_class] if indices_class else [args.ipc for i in range(num_classes)]
+    if args.imbal_syn == 'linear':
+        data_ratio = [data_per_class[i] / sum(data_per_class) for i in range(num_classes)]   
+    elif args.imbal_syn == 'log':
+        data_ratio = [log2(data_per_class[i]) / sum(map(log2, data_per_class)) for i in range(num_classes)]
+    else:
+        data_ratio = [1 / num_classes for _ in range(num_classes)]
+
+    # label_syn = torch.tensor([np.ones(args.ipc)*i for i in range(num_classes)], dtype=torch.long, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
+    label_syn = torch.tensor(reduce(lambda x, y: x+y, [[i]*ceil(data_ratio[i]*overall_synset_size) for i in range(num_classes)]), dtype=torch.long, requires_grad=False, device=args.device).view(-1)
+    return image_syn, label_syn
 
 AUGMENT_FNS = {
     'color': [rand_brightness, rand_saturation, rand_contrast],
