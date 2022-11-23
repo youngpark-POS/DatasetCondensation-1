@@ -659,7 +659,7 @@ def rand_cutout(x, param):
 def init_synset(args, channel, num_classes, im_size, indices_class=None):
 
     overall_synset_size = num_classes*args.ipc
-    image_syn = torch.randn(size=(overall_synset_size, channel, im_size[0], im_size[1]), dtype=torch.float, requires_grad=True, device=args.device)
+    # image_syn = torch.randn(size=(overall_synset_size, channel, im_size[0], im_size[1]), dtype=torch.float, requires_grad=True, device=args.device)
 
     data_per_class = [len(i) for i in indices_class] if indices_class else [args.ipc for i in range(num_classes)]
     if args.imbal_syn == 'linear':
@@ -671,7 +671,9 @@ def init_synset(args, channel, num_classes, im_size, indices_class=None):
 
     # label_syn = torch.tensor([np.ones(args.ipc)*i for i in range(num_classes)], dtype=torch.long, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
     label_syn = torch.tensor(reduce(lambda x, y: x+y, [[i]*ceil(data_ratio[i]*overall_synset_size) for i in range(num_classes)]), dtype=torch.long, requires_grad=False, device=args.device).view(-1)
-    return image_syn, label_syn
+    image_syn = torch.randn(size=(len(label_syn), channel, im_size[0], im_size[1]), dtype=torch.float, requires_grad=True, device=args.device)
+    indices_class_syn = [[i]*ceil(data_ratio[i]*overall_synset_size) for i in range(num_classes)]
+    return image_syn, label_syn, indices_class_syn
 
 AUGMENT_FNS = {
     'color': [rand_brightness, rand_saturation, rand_contrast],

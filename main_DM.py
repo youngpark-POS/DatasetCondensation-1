@@ -25,13 +25,13 @@ def main():
     parser.add_argument('--lr_net', type=float, default=0.01, help='learning rate for updating network parameters')
     parser.add_argument('--batch_real', type=int, default=256, help='batch size for real data')
     parser.add_argument('--batch_train', type=int, default=256, help='batch size for training networks')
-    parser.add_argument('--init', type=str, default='real', help='noise/real: initialize synthetic images from random noise or randomly sampled real images.')
+    parser.add_argument('--init', type=str, default='noise', help='noise/real: initialize synthetic images from random noise or randomly sampled real images.')
     parser.add_argument('--dsa_strategy', type=str, default='color_crop_cutout_flip_scale_rotate', help='differentiable Siamese augmentation strategy')
     parser.add_argument('--data_path', type=str, default='data', help='dataset path')
     parser.add_argument('--save_path', type=str, default='result', help='path to save results')
     parser.add_argument('--dis_metric', type=str, default='ours', help='distance metric')
     parser.add_argument('--imbal', type=str, default='balanced', help='imbalance type of training data')
-    parser.add_argument('--imbal_syn', type=str, default='balanced', help='imbalance type of syn data')
+    parser.add_argument('--imbal_syn', type=str, default='balanced', help='imbalance type of synthetic data')
     
     args = parser.parse_args()
     args.method = 'DM'
@@ -75,11 +75,11 @@ def main():
         if args.imbal != 'balanced':
 
             data_per_class = len(images_all) // num_classes
-            num_drop = [np.random.randint(data_per_class) for _ in range(num_classes)]
+            num_select = [max(np.random.randint(data_per_class), args.batch_real) for _ in range(num_classes)]
             sorted_set = sorted(zip(images_all, labels_all), key=lambda x: x[1])
             images_all, labels_all = [], []
             for i in range(num_classes):
-                target_set = sorted_set[data_per_class*i:data_per_class*(i+1)-num_drop[i]]
+                target_set = sorted_set[data_per_class*i:data_per_class*i + num_select[i]]
                 images_all.extend([x[0] for x in target_set])
                 labels_all.extend([x[1] for x in target_set])
 
@@ -94,7 +94,7 @@ def main():
         def get_images(c, n): # get random n images from class c
             idx_shuffle = np.random.permutation(indices_class[c])[:n]
             return images_all[idx_shuffle]
-
+        
         for ch in range(channel):
             print('real images channel %d, mean = %.4f, std = %.4f'%(ch, torch.mean(images_all[:, ch]), torch.std(images_all[:, ch])))
 
@@ -102,12 +102,12 @@ def main():
         ''' initialize the synthetic data '''
         # image_syn = torch.randn(size=(num_classes*args.ipc, channel, im_size[0], im_size[1]), dtype=torch.float, requires_grad=True, device=args.device)
         # label_syn = torch.tensor([np.ones(args.ipc)*i for i in range(num_classes)], dtype=torch.long, requires_grad=False, device=args.device).view(-1) # [0,0,0, 1,1,1, ..., 9,9,9]
-        image_syn, label_syn = init_synset(args, channel, num_classes, im_size, indices_class)
+        image_syn, label_syn, indices_class_syn = init_synset(args, channel, num_classes, im_size, indices_class)
 
         if args.init == 'real':
-            print('initialize synthetic data from random real images')
-            for c in range(num_classes):
-                image_syn.data[c*args.ipc:(c+1)*args.ipc] = get_images(c, args.ipc).detach().data
+            print('initialize synthetic data from random real images(now deprecated)')
+            # for c in range(num_classes):
+            #     image_syn.data[c*args.ipc:(c+1)*args.ipc] = get_images(c, args.ipc).detach().data
         else:
             print('initialize synthetic data from random noise')
 
@@ -168,7 +168,9 @@ def main():
                 loss = torch.tensor(0.0).to(args.device)
                 for c in range(num_classes):
                     img_real = get_images(c, args.batch_real)
-                    img_syn = image_syn[c*args.ipc:(c+1)*args.ipc].reshape((args.ipc, channel, im_size[0], im_size[1]))
+                    # img_syn = image_syn[c*args.ipc:(c+1)*args.ipc].reshape((args.ipc, channel, im_size[0], im_size[1]))
+                    c_start, c_length = sum([len(i) for i in indices_class_syn[:c]]), len(indices_class_syn[c])
+                    img_syn = image_syn[c_start:c_start+c_length].reshape((c_length, channel, im_size[0], im_size[1]))
 
                     if args.dsa:
                         seed = int(time.time() * 1000) % 100000
@@ -186,7 +188,9 @@ def main():
                 loss = torch.tensor(0.0).to(args.device)
                 for c in range(num_classes):
                     img_real = get_images(c, args.batch_real)
-                    img_syn = image_syn[c*args.ipc:(c+1)*args.ipc].reshape((args.ipc, channel, im_size[0], im_size[1]))
+                    # img_syn = image_syn[c*args.ipc:(c+1)*args.ipc].reshape((args.ipc, channel, im_size[0], im_size[1]))
+                    c_start, c_length = sum([len(i) for i in indices_class_syn[:c]]), len(indices_class_syn[c])
+                    img_syn = image_syn[c_start:c_start+c_length].reshape((c_length, channel, im_size[0], im_size[1]))
 
                     if args.dsa:
                         seed = int(time.time() * 1000) % 100000
