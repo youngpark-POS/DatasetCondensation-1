@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torchvision.utils import save_image
-from utils import get_loops, get_dataset, get_network, get_eval_pool, evaluate_synset, get_daparam, match_loss, get_time, TensorDataset, epoch, DiffAugment, ParamDiffAug, init_synset
+from utils import get_loops, get_dataset, get_network, get_eval_pool, evaluate_synset, get_daparam, match_loss, get_time, TensorDataset, epoch, DiffAugment, ParamDiffAug, init_synset, mmd
 
 
 def main():
@@ -55,6 +55,8 @@ def main():
     accs_all_exps = dict() # record performances of all experiments
     for key in model_eval_pool:
         accs_all_exps[key] = []
+
+    accs_iter = {'mean': {}, 'std': {}}
 
     data_save = []
 
@@ -135,15 +137,14 @@ def main():
                         accs.append(acc_test)
                     print('Evaluate %d random %s, mean = %.4f std = %.4f\n-------------------------'%(len(accs), model_eval, np.mean(accs), np.std(accs)))
 
+                    accs_iter['mean'][it], accs_iter['std'][it] = np.mean(accs), np.std(accs)
                     if it == args.Iteration: # record the final results
                         accs_all_exps[model_eval] += accs
 
                 ''' visualize and save '''
-                save_name = os.path.join(args.save_path, 'vis_%s_%s_%s_%dipc_exp%d_iter%d_%s_%s.png'% \
-                                        (args.method, args.dataset, args.model, args.ipc, exp, it, \
-                                        "" if args.imbal == 'balanced' else "imbal " + args.imbal, \
-                                        "" if args.imbal_syn == 'balanced' else "imbal_syn " + args.imbal_syn
-                                        ))
+                save_file_name = f"vis_{args.method}_{args.dataset}_{args.model}_{args.ipc}_{exp}_{it}_\
+                                    data-{args.imbal}_synset-{args.imbal_syn}.png"
+                save_name = os.path.join(args.save_path, save_file_name)
                 image_syn_vis = copy.deepcopy(image_syn.detach().cpu())
                 for ch in range(channel):
                     image_syn_vis[:, ch] = image_syn_vis[:, ch]  * std[ch] + mean[ch]
@@ -180,7 +181,8 @@ def main():
                     output_real = embed(img_real).detach()
                     output_syn = embed(img_syn)
 
-                    loss += torch.sum((torch.mean(output_real, dim=0) - torch.mean(output_syn, dim=0))**2)
+                    # loss += torch.sum((torch.mean(output_real, dim=0) - torch.mean(output_syn, dim=0))**2)
+                    loss += mmd(output_real, output_syn)
 
             else: # for ConvNetBN
                 images_real_all = []
@@ -206,8 +208,9 @@ def main():
                 output_real = embed(images_real_all).detach()
                 output_syn = embed(images_syn_all)
 
-                loss += torch.sum((torch.mean(output_real.reshape(num_classes, args.batch_real, -1), dim=1) - torch.mean(output_syn.reshape(num_classes, args.ipc, -1), dim=1))**2)
-
+                # loss += torch.sum((torch.mean(output_real.reshape(num_classes, args.batch_real, -1), dim=1) - torch.mean(output_syn.reshape(num_classes, args.ipc, -1), dim=1))**2)
+                sigma = torch.cat([output_real, output_syn], dim=0).median()
+                loss += mmd(output_real, output_syn, sigma)
 
 
             optimizer_img.zero_grad()
@@ -223,8 +226,10 @@ def main():
 
             if it == args.Iteration: # only record the final results
                 data_save.append([copy.deepcopy(image_syn.detach().cpu()), copy.deepcopy(label_syn.detach().cpu())])
-                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, }, os.path.join(args.save_path, 'res_%s_%s_%s_%dipc.pt'%(args.method, args.dataset, args.model, args.ipc)))
-
+                save_file_name = f"res_{args.method}_{args.dataset}_{args.model}_{args.ipc}_data-{args.imbal}_synset-{args.imbal_syn}.pt"
+                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, 'mean': accs_iter['mean'], 'std': accs_iter['std']}, \
+                           os.path.join(args.save_path, save_file_name))
+                # torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, }, os.path.join(args.save_path, 'res_%s_%s_%s_%dipc.pt'%(args.method, args.dataset, args.model, args.ipc)))
 
     print('\n==================== Final Results ====================\n')
     for key in model_eval_pool:
