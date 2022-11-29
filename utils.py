@@ -56,19 +56,6 @@ def get_dataset(dataset, data_path):
         dst_train = datasets.CIFAR10(data_path, train=True, download=True, transform=transform) # no augmentation
         dst_test = datasets.CIFAR10(data_path, train=False, download=True, transform=transform)
         class_names = dst_train.classes
-        # if imbalance != 'balanced':
-
-        #     np.random.seed(0)
-        #     prob = np.random.rand(num_classes)
-        #     normalized_prob = [p / sum(prob) for p in prob]
-
-        #     indices = np.random.multinomial(len(dst_train) // num_classes, normalized_prob)
-        #     c = Counter({i: indices[i] for i in range(num_classes)})
-        #     trimmed_dst_train= []
-        #     for i in range(num_classes):
-        #         idx_i_train = np.where(np.array(dst_train.targets) == i)
-        #         trimmed_dst_train.append(Subset(dst_train, idx_i_train[:c[i]]))
-        #     dst_train = ConcatDataset(trimmed_dst_train)
 
     elif dataset == 'CIFAR100':
         channel = 3
@@ -666,6 +653,9 @@ def init_synset(args, channel, num_classes, im_size, indices_class=None):
         data_ratio = [data_per_class[i] / sum(data_per_class) for i in range(num_classes)]   
     elif args.imbal_syn == 'log':
         data_ratio = [log2(data_per_class[i]) / sum(map(log2, data_per_class)) for i in range(num_classes)]
+    elif args.imbal_syn == 'random':
+        base_data_ratio = [1 + np.random.randint(args.ipc) for _ in range(num_classes)]
+        data_ratio = [x / sum(base_data_ratio) for x in base_data_ratio]
     else:
         data_ratio = [1 / num_classes for _ in range(num_classes)]
 
@@ -680,54 +670,19 @@ def mmd(x, y, sigma=None):
 
     x_size, y_size = x.size(0), y.size(0)
     xy = torch.cat([x, y], dim=0)
-    dist = torch.cdist(xy, xy, p=2.0).cuda()
-
+    dist = torch.cdist(xy, xy, p=2.0).cuda() + torch.Tensor([1e-5]).cuda()
+    # print(x, y, dist, sep='\n')
     if sigma is None:
         pdist = torch.pdist(torch.cat([x, y], dim=0))
         sigma = pdist.median() / 2
     k = torch.exp((-1/(2*(sigma**2))) * dist**2).to('cuda') + torch.eye(x_size+y_size).to('cuda')*1e-5
 
     k_x, k_y, k_xy = k[:x_size, :x_size], k[x_size:, x_size:], k[:x_size, x_size:]
-    mmd = k_x.sum() / ((x_size-1)*x_size) + k_y.sum() / ((y_size-1)*y_size) + k_xy.sum() / (x_size*y_size)
-    return mmd
-
-
-    #     x = x.unsqueeze(1).expand(x_size, y_size, dim)
-    #     y = y.unsqueeze(0).expand(x_size, y_size, dim)
-
-    #     kernel_input = (x-y).pow(2).mean(2) / float(dim)
-    #     return torch.exp(-kernel_input)
-
-    # xx, yy, xy = compute_kernel(x, x), compute_kernel(y, y), compute_kernel(x, y)
-    # return xx.mean() + yy.mean() - 2*xy.mean()
-
-    # def gaussian_kernel(args, x, y, kernel_mul=2.0, kernel_num=5):
-    #     n_samples = int(x.size(0)) + int(y.size(0))
-
-    #     print(x.size(), y.size())
-    #     total = torch.cat([x, y], dim=0)
-    #     total_dim0 = total.unsqueeze(0).expand(int(total.size(0)), int(total.size(0)), int(total.size(1)))
-    #     total_dim1 = total.unsqueeze(1).expand(int(total.size(0)), int(total.size(0)), int(total.size(1)))
-    #     print(total_dim0.size(), total_dim1.size())
-    #     dist_l2 = ((total_dim0-total_dim1)**2).sum(2)
-    #     print(dist_l2.size())
-
-    #     bandwidth = (torch.sum(dist_l2.data) / (n_samples**2 - n_samples)) / (kernel_mul ** (kernel_num // 2))
-    #     bandwidth_list = [bandwidth * (kernel_mul**i) for i in range(kernel_num)]
-
-    #     kernel_val = [torch.exp(-dist_l2 / bw) for bw in bandwidth_list]
-    #     return sum(kernel_val)
-
-    # len_x, len_y = int(x.size(0)), int(y.size(0))
-    # kernels = gaussian_kernel(args, x, y)
-
-    # xx = kernels[:len_x, :len_x]
-    # yy = kernels[len_x:, len_x:]
-    # xy = kernels[:len_x, len_x:]
-    # yx = kernels[len_x:, :len_x]
-    
-    # print(xx.size(), yy.size(), xy.size(), yx.size())
-    # return xx.mean() + yy.mean() - xy.mean() - yx.mean()
+    sum_x = k_x.sum() / ((x_size-1)*x_size if x_size > 1 else 1)
+    sum_y = k_y.sum() / ((y_size-1)*y_size if y_size > 1 else 1)
+    sum_xy = k_xy.sum() / (x_size*y_size)
+    # print(x_size, y_size, sum_x, sum_y, sum_xy)
+    return sum_x + sum_y + sum_xy
 
 AUGMENT_FNS = {
     'color': [rand_brightness, rand_saturation, rand_contrast],
