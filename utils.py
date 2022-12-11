@@ -1,6 +1,6 @@
 import time
 import os
-from math import ceil, log2
+from math import ceil, log2, log10
 from functools import reduce
 from xml.dom import INVALID_MODIFICATION_ERR
 import numpy as np
@@ -653,6 +653,8 @@ def init_synset(args, channel, num_classes, im_size, indices_class=None):
         data_ratio = [data_per_class[i] / sum(data_per_class) for i in range(num_classes)]   
     elif args.imbal_syn == 'log':
         data_ratio = [log2(data_per_class[i]) / sum(map(log2, data_per_class)) for i in range(num_classes)]
+    elif args.imbal_syn == 'log10':
+        data_ratio = [log10(data_per_class[i]) / sum(map(log10, data_per_class)) for i in range(num_classes)]
     elif args.imbal_syn == 'random':
         base_data_ratio = [1 + np.random.randint(args.ipc) for _ in range(num_classes)]
         data_ratio = [x / sum(base_data_ratio) for x in base_data_ratio]
@@ -667,6 +669,8 @@ def init_synset(args, channel, num_classes, im_size, indices_class=None):
 
 
 def mmd(x, y, sigma=None):
+
+    # mmd metric, not yet fully implemented 
 
     x_size, y_size = x.size(0), y.size(0)
     xy = torch.cat([x, y], dim=0)

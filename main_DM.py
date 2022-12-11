@@ -81,7 +81,8 @@ def main():
             data_per_class = len(images_all) // num_classes
             if args.imbal_ratio > 0:
                 imbal_ratio = min(args.imbal_ratio, args.ipc)
-                class_ratio = np.random.permutation([1/imbal_ratio, 1] + list(np.random.rand(num_classes - 2)))
+                class_ratio = np.append(np.array([1/imbal_ratio, 1]), np.clip((np.random.rand(num_classes - 2)), 1/imbal_ratio, 1))
+                class_ratio = np.random.permutation(class_ratio)
                 num_select = [ceil(i * data_per_class) for i in class_ratio]
             else:
                 num_select = [max(np.random.randint(data_per_class), args.batch_real) for _ in range(num_classes)]
@@ -216,9 +217,9 @@ def main():
                 output_real = embed(images_real_all).detach()
                 output_syn = embed(images_syn_all)
 
-                # loss += torch.sum((torch.mean(output_real.reshape(num_classes, args.batch_real, -1), dim=1) - torch.mean(output_syn.reshape(num_classes, args.ipc, -1), dim=1))**2)
-                sigma = torch.cat([output_real, output_syn], dim=0).median().detach()
-                loss += mmd(output_real, output_syn, sigma)
+                loss += torch.sum((torch.mean(output_real.reshape(num_classes, args.batch_real, -1), dim=1) - torch.mean(output_syn.reshape(num_classes, args.ipc, -1), dim=1))**2)
+                # sigma = torch.cat([output_real, output_syn], dim=0).median().detach()
+                # loss += mmd(output_real, output_syn, sigma)
 
 
             optimizer_img.zero_grad()
@@ -235,7 +236,8 @@ def main():
             if it == args.Iteration: # only record the final results
                 data_save.append([copy.deepcopy(image_syn.detach().cpu()), copy.deepcopy(label_syn.detach().cpu())])
                 save_file_name = f"res_{args.method}_{args.dataset}_{args.model}_{args.ipc}_data-{args.imbal}_rate{args.imbal_ratio}_synset-{args.imbal_syn}.pt"
-                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, 'mean': accs_iter['mean'], 'std': accs_iter['std']}, \
+                torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, 'mean': accs_iter['mean'], 'std': accs_iter['std'],
+                            'ipc': [len(indices_class_syn[c]) for c in range(num_classes)]}, \
                            os.path.join(args.save_path, save_file_name))
                 # torch.save({'data': data_save, 'accs_all_exps': accs_all_exps, }, os.path.join(args.save_path, 'res_%s_%s_%s_%dipc.pt'%(args.method, args.dataset, args.model, args.ipc)))
 
